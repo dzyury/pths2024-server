@@ -7,7 +7,7 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class Cat {
+public class User {
     private String name;
-    private int age;
+    private Position position;
 }
