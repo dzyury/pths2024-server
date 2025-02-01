@@ -10,6 +10,8 @@ import pths.server.model.Board;
 import pths.server.model.Turn;
 import pths.server.service.board.BoardService;
 
+import java.security.Principal;
+
 @RestController
 @RequiredArgsConstructor
 public class BoardController {
@@ -26,7 +28,8 @@ public class BoardController {
     }
 
     @PostMapping("/board")
-    public Board create() {
+    public Board create(Principal principal) {
+        System.out.println(principal.getName());
         return boardService.create();
     }
 }
