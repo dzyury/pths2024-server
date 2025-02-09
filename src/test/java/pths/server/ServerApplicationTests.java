@@ -2,7 +2,6 @@ package pths.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.val;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -10,6 +9,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import pths.server.model.Board;
@@ -21,7 +21,10 @@ import pths.server.security.MapUserDetailsService;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.hamcrest.CoreMatchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.springframework.http.HttpStatus.FORBIDDEN;
+import static org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static pths.server.model.Position.O;
@@ -45,58 +48,55 @@ class ServerApplicationTests {
     @BeforeEach
     public void setup() throws Exception {
         authService.clear();
-        registerUser("kit", "cat");
-        registerUser("kot", "cat");
+        registerUser("kit");
+        registerUser("kot");
+        registerUser("kod");
     }
 
     @Test
     public void startWithNoUsers() throws Exception {
         val board = createBoard();
-        try {
-            val details = "x________";
-            turn(board.getId(), "kit", details);
-            Assertions.fail("Ожидается ошибка");
-        } catch (Exception e) {
-            // OK, перед началом игры должно быть два игрока (X, O)
-        }
+
+        val details = "x________";
+        turn(board.getId(), "kot", details, UNPROCESSABLE_ENTITY, "Перед началом игры должно быть два игрока");
+    }
+
+    @Test
+    public void attachWrongUser() throws Exception {
+        val board = createBoard();
+
+        val body = mapper.writeValueAsString(new User("kit", X));
+        mockMvc.perform(post("/board/" + board.getId() + "/user")
+                        .content(body)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", auth("kot")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("message", is("Игрок не может сесть за поле")));
     }
 
     @Test
     public void startWithOnlyXUser() throws Exception {
         val board = createBoard();
         attachUser(board.getId(), new User("kit", X));
-        try {
-            val details = "x________";
-            turn(board.getId(), "kit", details);
-            Assertions.fail("Ожидается ошибка");
-        } catch (Exception e) {
-            // OK, перед началом игры должно быть два игрока (X, O)
-        }
+
+        val details = "x________";
+        turn(board.getId(), "kot", details, UNPROCESSABLE_ENTITY, "Перед началом игры должно быть два игрока");
     }
 
     @Test
     public void startWithOnlyOUser() throws Exception {
         val board = createBoard();
         attachUser(board.getId(), new User("kot", O));
-        try {
-            val details = "x________";
-            turn(board.getId(), "kot", details);
-            Assertions.fail("Ожидается ошибка");
-        } catch (Exception e) {
-            // OK, перед началом игры должно быть два игрока (X, O)
-        }
+
+        val details = "x________";
+        turn(board.getId(), "kot", details, UNPROCESSABLE_ENTITY, "Перед началом игры должно быть два игрока");
     }
 
     @Test
     public void reattachOnX() throws Exception {
         val board = createBoard();
         attachUser(board.getId(), new User("kit", X));
-        try {
-            attachUser(board.getId(), new User("kot", X));
-            Assertions.fail("Ожидается ошибка");
-        } catch (Exception e) {
-            // OK, нельзя сесть на занятое место
-        }
+        attachUser(board.getId(), new User("kot", X), UNPROCESSABLE_ENTITY);
     }
 
     @Test
@@ -109,6 +109,49 @@ class ServerApplicationTests {
         attachUser(board.getId(), new User("kot", O));
         val details = "x________";
         turn(board.getId(), "kit", details);
+    }
+
+    @Test
+    public void gameForbidden0() throws Exception {
+        board = createBoard();
+        attachUser(board.getId(), new User("kit", X));
+        attachUser(board.getId(), new User("kot", O));
+
+        val details = "x________";
+        turn(board.getId(), "kod", details, FORBIDDEN, "Игрок не может сделать ход");
+    }
+
+    @Test
+    public void gameForbidden1() throws Exception {
+        board = createBoard();
+        attachUser(board.getId(), new User("kit", X));
+        attachUser(board.getId(), new User("kot", O));
+        attachUser(board.getId(), new User("kod", null));
+
+        val details = "x________";
+        turn(board.getId(), "kod", details, FORBIDDEN, "Игрок не может сделать ход");
+    }
+
+    @Test
+    public void gameForbidden2() throws Exception {
+        board = createBoard();
+        attachUser(board.getId(), new User("kit", X));
+        attachUser(board.getId(), new User("kot", O));
+
+        val details = "x________";
+        turn(board.getId(), "kot", details, FORBIDDEN, "Игрок не может сделать ход");
+    }
+
+    @Test
+    public void gameForbidden3() throws Exception {
+        board = createBoard();
+        attachUser(board.getId(), new User("kit", X));
+        attachUser(board.getId(), new User("kot", O));
+
+        var details = "x________";
+        turn(board.getId(), "kit", details);
+        details = "xo_______";
+        turn(board.getId(), "kit", details, FORBIDDEN, "Игрок не может сделать ход");
     }
 
     @ParameterizedTest
@@ -163,7 +206,7 @@ class ServerApplicationTests {
             attachUser(board.getId(), new User("kot", O));
             newBoard = getBoard(board.getId());
         } else {
-            val username = "X_TURN".equals(status) ? "kot" : "kit";
+            val username = "O_TURN".equals(status) ? "kit" : "kot";
             newBoard = turn(board.getId(), username, details);
         }
 
@@ -221,12 +264,7 @@ class ServerApplicationTests {
         val board = createBoard();
         attachUser(board.getId(), new User("kit", X));
         attachUser(board.getId(), new User("kot", O));
-        try {
-            turn(board.getId(), "kit", details);
-            Assertions.fail();
-        } catch (Exception e) {
-            // OK, невалидный ход из начального положения
-        }
+        turn(board.getId(), "kit", details, UNPROCESSABLE_ENTITY, "Неправильный ход");
     }
 
     private Board getBoard(int id) throws Exception {
@@ -249,6 +287,16 @@ class ServerApplicationTests {
         return mapper.readValue(board, Board.class);
     }
 
+    private void attachUser(int id, User user, HttpStatus status) throws Exception {
+        val body = mapper.writeValueAsString(user);
+        mockMvc.perform(post("/board/" + id + "/user")
+                        .content(body)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", auth(user.getName())))
+                .andExpect(status().is(status.value()))
+                .andExpect(jsonPath("message", is("Место уже занято")));
+    }
+
     private void attachUser(int id, User user) throws Exception {
         val body = mapper.writeValueAsString(user);
         mockMvc.perform(post("/board/" + id + "/user")
@@ -256,6 +304,18 @@ class ServerApplicationTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("Authorization", auth(user.getName())))
                 .andExpect(status().isOk());
+    }
+
+    private Board turn(int id, String username, String details, HttpStatus status, String error) throws Exception {
+        val body = String.format("{\"details\": \"%s\"}", details);
+        mockMvc.perform(patch("/board/" + id)
+                        .content(body)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", auth(username)))
+                .andExpect(status().is(status.value()))
+                .andExpect(jsonPath("message", is(error)));
+//                .andDo(MockMvcResultHandlers.print());
+        return getBoard(id);
     }
 
     private Board turn(int id, String username, String details) throws Exception {
@@ -269,8 +329,8 @@ class ServerApplicationTests {
         return getBoard(id);
     }
 
-    private void registerUser(String name, String password) throws Exception {
-        val user = new UserInfo(name, password);
+    private void registerUser(String name) throws Exception {
+        val user = new UserInfo(name, "cat");
         users.put(user.getName(), user);
 
         val body = mapper.writeValueAsString(user);
